@@ -4,7 +4,7 @@ from typing import Dict
 
 
 class SQLiteDatabase:
-    DB_NAME = 'FileServer'
+    DB_NAME = 'FileServer.db'
 
     def __init__(self, name=DB_NAME):
         self.conn = None
@@ -22,7 +22,7 @@ class SQLiteDatabase:
             print("Error connecting to database!")
 
     def init_db(self, tables: Dict[str, str]):
-        for table_name, table_description in enumerate(tables):
+        for table_name, table_description in tables.items():
             self.create_table(table_name, table_description)
 
     def close(self):
@@ -48,16 +48,15 @@ class SQLiteDatabase:
         return rows[len(rows) - limit if limit else 0:]
 
     def create_table(self, table_name, table_description):
-        query = f"""
-                CREATE TABLE {table_name} (
-                   {table_description}
-                );"""
+        query = f"CREATE TABLE IF NOT EXISTS {table_name} ({table_description});"
 
         self.cursor.execute(query)
 
-    def write(self, table_name, columns_description):
+    def write(self, query):
+        self.cursor.execute(query)
 
-    # TODO: complete
+    def update(self, query):
+        self.cursor.execute(query)
 
     def query(self, sql):
         self.cursor.execute(sql)
