@@ -1,5 +1,5 @@
 from Crypto.PublicKey import RSA
-from Crypto.Cipher import PKCS1_v1_5 as Cipher_PKCS1_v1_5
+from Crypto.Cipher import PKCS1_OAEP
 from Crypto.Cipher import AES
 from Crypto.Random import get_random_bytes
 import sys
@@ -74,8 +74,8 @@ def get_crc_sum(b):
 
 
 def rsa_encryption(public_key, data):
-    cipher = Cipher_PKCS1_v1_5.new(RSA.importKey(public_key))
-    return cipher.encrypt(data.encode())
+    cipher = PKCS1_OAEP.new(RSA.importKey(public_key))
+    return cipher.encrypt(data)
 
 
 def generate_aes_key():

@@ -10,6 +10,8 @@ from sqlite3 import IntegrityError
 import secrets
 
 from crypto.utils import *
+from base64 import b64encode
+import struct
 
 
 class FileServerRequestHandler:
@@ -53,15 +55,23 @@ class FileServerRequestHandler:
         client_user_name = self.request.payload[:255]
         public_key = self.request.payload[255:]
 
+        base64_encoded_public_key = b64encode(public_key).decode('utf-8')
         with SQLiteDatabase() as db:
             db.update(
-                f"UPDATE Clients SET aes_key = '{public_key}' WHERE name={client_user_name}"
+                f"UPDATE Client SET aes_key = '{base64_encoded_public_key}' WHERE name='{client_user_name.decode('utf-8')}'"
             )
+        generated_aes_key = generate_aes_key()
+        print('ORIGINAL:', generated_aes_key)
+        return rsa_encryption(data=generated_aes_key, public_key=public_key)
 
-        return rsa_encryption(data=generate_aes_key(), public_key=public_key)
+    def send_file(self, aes_key):
+        headers = struct.unpack('<16sI255s', self.request[:255])
+        client_id, content_size, file_name = headers
+        message_content = self.request[256:]
+        message_content = message_content[:content_size]
 
-    def send_file(self):
-        pass
+        decrypted_file = aes_decryption(aes_key=aes_key, data=message_content)
+        return get_crc_sum(decrypted_file)
 
     def valid_crc(self):
         pass
