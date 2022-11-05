@@ -7,9 +7,10 @@ import traceback
 from Crypto.Cipher import PKCS1_OAEP
 
 
-logging.basicConfig()
+logging.basicConfig(format='%(asctime)s %(message)s')
 
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
 
 
 def init_server():
@@ -17,33 +18,36 @@ def init_server():
 
 
 def main():
-    # with FileTCPServer() as server:
-    #     server.start()
-    import Crypto
-    from Crypto.PublicKey import RSA
-    from Crypto import Random
-    import ast
-
-    random_generator = Random.new().read
-    key = RSA.generate(1024, random_generator)  # generate pub and priv key
-
-    publickey = key.publickey()  # pub key export for exchange
+    with FileTCPServer(logger=logger) as server:
+        server.start()
 
 
-    try:
-        # a = FileServerRequestHandler('blbla')
-        # a.init_db()
-        #
-        # a.request = FileServerRequest(123123, 1, 123, 123123, ('A'*255).encode() + publickey.export_key('DER'))
-        # encrypted = a.save_public_key()
-        # import ast
-        #
-        # decryptor = PKCS1_OAEP.new(key)
-        # decrypted = decryptor.decrypt(ast.literal_eval(str(encrypted)))
-        # print(decrypted)
 
-    except Exception as e:
-        logger.error(str(e) + '\n' + traceback.format_exc())
+    # import Crypto
+    # from Crypto.PublicKey import RSA
+    # from Crypto import Random
+    # import ast
+    #
+    # random_generator = Random.new().read
+    # key = RSA.generate(1024, random_generator)  # generate pub and priv key
+    #
+    # publickey = key.publickey()  # pub key export for exchange
+
+    #
+    # try:
+    #     # a = FileServerRequestHandler('blbla')
+    #     # a.init_db()
+    #     #
+    #     # a.request = FileServerRequest(123123, 1, 123, 123123, ('A'*255).encode() + publickey.export_key('DER'))
+    #     # encrypted = a.save_public_key()
+    #     # import ast
+    #     #
+    #     # decryptor = PKCS1_OAEP.new(key)
+    #     # decrypted = decryptor.decrypt(ast.literal_eval(str(encrypted)))
+    #     # print(decrypted)
+    #
+    # except Exception as e:
+    #     logger.error(str(e) + '\n' + traceback.format_exc())
 
 
 

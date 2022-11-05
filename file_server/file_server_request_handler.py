@@ -2,6 +2,9 @@ from structures.file import File
 from structures.client import Client
 
 from structures.request import FileServerRequest, InvalidRequest, UserAlreadyRegistered
+from structures.response import FileServerResponse
+from structures.consts import *
+
 from typing import Callable, Dict
 from sqlite_dal import SQLiteDatabase
 
@@ -20,18 +23,21 @@ class FileServerRequestHandler:
     def __init__(self, raw_request):
         self.raw_request = raw_request
         self.request: FileServerRequest = None
+        self.init_db()
 
-    def handle(self):
+    def handle(self) -> FileServerResponse:
         request: FileServerRequest = FileServerRequest.parse_binary_request(self.raw_request)
         self.request = request
 
         requested_function = self.request_to_function_mapping.get(request.code)
 
-        requested_function()
+        response: FileServerResponse = requested_function()
+
+        return response
 
     @property
     def request_to_function_mapping(self) -> Dict[int, Callable]:
-        return {1100: self.register_user, 1101: self.send_public_key, 1103: self.send_file, 1104: self.valid_crc,
+        return {1100: self.register_user, 1101: self.save_public_key, 1103: self.send_file, 1104: self.valid_crc,
                 1105: self.invalid_crc, 1106: self.invalid_crc_terminating}
 
     @staticmethod
@@ -41,7 +47,7 @@ class FileServerRequestHandler:
 
     def register_user(self):
         client_id = self.request.client_id = secrets.token_hex(16)
-        client_user_name = self.request.payload
+        client_user_name = self.request.payload[:-1].decode()  # Normalizing the input - removing the trailing NULL-BYTE
 
         with SQLiteDatabase() as db:
             try:
@@ -50,6 +56,11 @@ class FileServerRequestHandler:
             except IntegrityError as e:
                 if 'UNIQUE constraint failed' in str(e):
                     raise UserAlreadyRegistered('User already registered - username is taken')
+            except Exception as e:
+                print(str(e))
+
+        return FileServerResponse(version=self.request.version, code=RESPONSE_REGISTERED_SUCCESSFULLY, payload_size=16,
+                                  payload=client_id)
 
     def save_public_key(self):
         client_user_name = self.request.payload[:255]

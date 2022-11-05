@@ -1,5 +1,7 @@
 import selectors
 import socket
+import logging
+from file_server.file_server_request_handler import FileServerRequestHandler
 
 sel = selectors.DefaultSelector()
 
@@ -7,64 +9,92 @@ sel = selectors.DefaultSelector()
 class FileTCPServer:
     LOCALHOST_KEYWORD = 'localhost'
     MAX_CONNECTIONS = 100
-    PORT_INFO_FILE_PATH = '../port.info'
+    PORT_INFO_FILE_PATH = 'port.info'
     READ_ONLY_FILE_MODE = 'r'
     DEFAULT_PORT = 1234
 
-    def __init__(self):
+    def __init__(self, logger: logging.Logger):
+        self.logger: logging.Logger = logger
         self.port = FileTCPServer.read_server_port()
         self.max_connections = FileTCPServer.MAX_CONNECTIONS
+        self.current_connections = {}
 
     @staticmethod
     def read_server_port():
-
         try:
-            with(FileTCPServer.PORT_INFO_FILENAME, FileTCPServer.READ_ONLY_FILE_MODE) as f:
+            with open(FileTCPServer.PORT_INFO_FILE_PATH, FileTCPServer.READ_ONLY_FILE_MODE) as f:
                 return int(f.read())
 
-        except Exception:
+        except Exception as e:
             return FileTCPServer.DEFAULT_PORT
 
-    @staticmethod
-    def accept(sock, mask):
+    def accept(self, sock, mask):
         conn, addr = sock.accept()  # Should be ready
-        print('accepted', conn, 'from', addr)
+        self.logger.debug(f"Accepted connection {conn} from {addr}")
         conn.setblocking(False)
+
+        self.current_connections[conn.fileno()] = conn.getpeername()
         sel.register(conn, selectors.EVENT_READ, FileTCPServer.read)
 
-    @staticmethod
-    def read(conn, mask):
-        data = conn.recv(1024)  # Should be ready
-        if data:
-            print('echoing', repr(data), 'to', conn)
-            conn.send(data)  # Hope it won't block
-        else:
-            print('closing', conn)
-            sel.unregister(conn)
-            conn.close()
+    def close_connection(self, conn):
+        connection_name = self.current_connections[conn.fileno()]
+        self.logger.info('closing connection to {0}'.format(connection_name))
+        del self.current_connections[conn.fileno()]
+        sel.unregister(conn)
+        conn.close()
 
-    @staticmethod
-    def init_server(port, max_connections):
+    def read(self, conn: socket.socket, mask=None):
+        data = bytearray()
+        batch = 1024
+        while len(data) < 1024:
+            packet = conn.recv(batch - len(data))
+            if not packet:
+                break
+            data.extend(packet)
+
+        if data:
+            self.logger.debug(f"Received data {repr(data)} - to {conn} ")
+            response = self.handle_request(data)
+            conn.send(response)
+        else:
+            self.close_connection(conn)
+
+    def handle_request(self, raw_request: bytearray) -> bytearray:
+        response = FileServerRequestHandler(raw_request).handle()
+        return response.generate_binary_request()
+
+    def init_server(self, port, max_connections) -> socket.socket:
         """
         :param connections:number of unaccepted connections that the system will allow before refusing new connections.
         """
-
         sock = socket.socket()
         sock.bind((FileTCPServer.LOCALHOST_KEYWORD, port))
         sock.listen(max_connections)
         sock.setblocking(False)
         sel.register(sock, selectors.EVENT_READ, FileTCPServer.accept)
+        return sock
 
     def start_connections_loop(self):
+        self.logger.debug('Starting connection loop')
         while True:
             events = sel.select()
             for key, mask in events:
                 callback = key.data
-            callback(key.fileobj, mask)
+                try:
+                    callback(self, key.fileobj, mask)
+                except (ConnectionResetError, ConnectionAbortedError, ConnectionRefusedError) as e:
+                    self.close_connection(key.fileobj)
+
+    def __enter__(self):
+        self.start()
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.stop()
 
     def start(self):
-        self.init_server()
+        self.socket = self.init_server(self.read_server_port(), self.MAX_CONNECTIONS)
         self.start_connections_loop()
 
     def stop(self):
-        pass
+        self.socket.close()
+        self.logger.debug('TCP server closed successfully')
