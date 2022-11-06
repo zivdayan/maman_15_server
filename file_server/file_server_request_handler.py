@@ -55,6 +55,9 @@ class FileServerRequestHandler:
                     f"INSERT INTO Client(id,name,public_key,last_seen,aes_key) VALUES('{client_id}','{client_user_name}',NULL,NULL,NULL)")
             except IntegrityError as e:
                 if 'UNIQUE constraint failed' in str(e):
+                    return FileServerResponse(version=self.request.version, code=RESPONSE_REGISTERATION_FAILED,
+                                              payload_size=0,
+                                              payload=str())
                     raise UserAlreadyRegistered('User already registered - username is taken')
             except Exception as e:
                 print(str(e))
@@ -63,17 +66,24 @@ class FileServerRequestHandler:
                                   payload=client_id)
 
     def save_public_key(self):
-        client_user_name = self.request.payload[:255]
+        client_user_name: bytearray = self.request.payload[:255]
+        client_user_name: str = client_user_name[0:client_user_name.find(b'\0')].decode()
         public_key = self.request.payload[255:]
 
-        base64_encoded_public_key = b64encode(public_key).decode('utf-8')
+        base64_encoded_public_key = b64encode(public_key).decode()
         with SQLiteDatabase() as db:
             db.update(
-                f"UPDATE Client SET aes_key = '{base64_encoded_public_key}' WHERE name='{client_user_name.decode('utf-8')}'"
+                f"UPDATE Client SET aes_key = '{base64_encoded_public_key}' WHERE name='{client_user_name}'"
             )
         generated_aes_key = generate_aes_key()
-        print('ORIGINAL:', generated_aes_key)
-        return rsa_encryption(data=generated_aes_key, public_key=public_key)
+
+        print(f"generated aes key {generated_aes_key}")
+        encrypted_aes_key = rsa_encryption(data=generated_aes_key, public_key=public_key)
+
+        raw_payload = struct.pack(f"16s{len(encrypted_aes_key)}s", self.request.client_id, encrypted_aes_key)
+        return FileServerResponse(version=self.request.version, code=RESPONSE_PK_RECIEVED_SENDING_AES_KEY,
+                                  payload_size=len(raw_payload),
+                                  payload=raw_payload)
 
     def send_file(self, aes_key):
         headers = struct.unpack('<16sI255s', self.request[:255])

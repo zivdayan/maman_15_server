@@ -13,6 +13,8 @@ logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
 
 
+users_data = dict() # Global variable, containing all of the client's data
+
 def init_server():
     pass
 

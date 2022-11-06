@@ -40,6 +40,7 @@ class FileServerRequest:
             format += 'I'  # unsigned payload size
 
             client_id, version, code, payload_size = struct.unpack(format, base_request)
+
             payload = raw_request[
                       FileServerRequest.BASE_REQUEST_LENGTH:FileServerRequest.BASE_REQUEST_LENGTH + payload_size]
 

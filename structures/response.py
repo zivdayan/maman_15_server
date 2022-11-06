@@ -8,8 +8,7 @@ class FileServerResponse:
         self.payload_size = payload_size
         self.payload = payload
 
-    @classmethod
-    def generate_binary_request(cls, raw_request):
+    def generate_binary_request(self):
         '''
              +----+-----+-------+------+----------+--------+
               | version  |  code  | payload_size | payload |
@@ -24,22 +23,20 @@ class FileServerResponse:
 
         try:
 
-            client_id = None
-            version = None
-            code = None
-            payload = None
-            payload_size = None
-
             format = '<'  # Little endian annotation
             format += 'c'  # version
             format += 'H'  # code
             format += 'I'  # unsigned payload size
+            format += f"{self.payload_size}s"
 
-            struct.pack(format, version, code, payload_size)
+            if type(self.payload) is str:
+                self.payload = self.payload.encode()
 
-            return cls(client_id=client_id, version=version, code=code, payload_size=payload_size, payload=payload)
+            print(f"payload = {self.payload}")
+            return struct.pack(format, self.version, self.code, self.payload_size, self.payload)
 
-        except Exception:
+        except Exception as e:
+            print(str(e))
             raise FileServerResponse.InvalidException
 
 

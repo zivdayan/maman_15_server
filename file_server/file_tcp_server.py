@@ -28,10 +28,11 @@ class FileTCPServer:
         except Exception as e:
             return FileTCPServer.DEFAULT_PORT
 
-    def accept(self, sock, mask):
+    def accept(self, sock: socket.socket, mask):
         conn, addr = sock.accept()  # Should be ready
         self.logger.debug(f"Accepted connection {conn} from {addr}")
-        conn.setblocking(False)
+        conn.setblocking(True)
+        conn.settimeout(1)
 
         self.current_connections[conn.fileno()] = conn.getpeername()
         sel.register(conn, selectors.EVENT_READ, FileTCPServer.read)
@@ -45,23 +46,32 @@ class FileTCPServer:
 
     def read(self, conn: socket.socket, mask=None):
         data = bytearray()
-        batch = 1024
-        while len(data) < 1024:
-            packet = conn.recv(batch - len(data))
-            if not packet:
+        batch = 4096
+        while True:
+            try:
+                packet = conn.recv(batch)
+                if not packet:
+                    break
+                data.extend(packet)
+            except socket.timeout:
                 break
-            data.extend(packet)
 
         if data:
-            self.logger.debug(f"Received data {repr(data)} - to {conn} ")
+            self.logger.debug(f"Received data ({len(data)}) {repr(data)} - to {conn} ")
             response = self.handle_request(data)
             conn.send(response)
+
+            self.logger.debug(f"Sent data in size ({len(response)})")
+
+            self.close_connection(conn)
         else:
             self.close_connection(conn)
 
     def handle_request(self, raw_request: bytearray) -> bytearray:
         response = FileServerRequestHandler(raw_request).handle()
-        return response.generate_binary_request()
+        binary_response = response.generate_binary_request()
+        print('total response size ' + str(len(binary_response)))
+        return binary_response
 
     def init_server(self, port, max_connections) -> socket.socket:
         """
@@ -70,7 +80,8 @@ class FileTCPServer:
         sock = socket.socket()
         sock.bind((FileTCPServer.LOCALHOST_KEYWORD, port))
         sock.listen(max_connections)
-        sock.setblocking(False)
+        sock.settimeout(5)
+        sock.setblocking(True)
         sel.register(sock, selectors.EVENT_READ, FileTCPServer.accept)
         return sock
 
