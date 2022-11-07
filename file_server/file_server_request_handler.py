@@ -7,14 +7,16 @@ from structures.consts import *
 
 from typing import Callable, Dict
 from sqlite_dal import SQLiteDatabase
-
+from datetime import datetime
 from sqlite3 import IntegrityError
-
+import binascii
 import secrets
 
 from crypto.utils import *
 from base64 import b64encode
 import struct
+
+clients = list()
 
 
 class FileServerRequestHandler:
@@ -46,13 +48,15 @@ class FileServerRequestHandler:
             db.init_db(FileServerRequestHandler.BASE_TABLES)
 
     def register_user(self):
-        client_id = self.request.client_id = secrets.token_hex(16)
+        global clients
+
+        client_id = self.request.client_id = binascii.unhexlify(secrets.token_hex(16))
         client_user_name = self.request.payload[:-1].decode()  # Normalizing the input - removing the trailing NULL-BYTE
 
         with SQLiteDatabase() as db:
             try:
                 db.write(
-                    f"INSERT INTO Client(id,name,public_key,last_seen,aes_key) VALUES('{client_id}','{client_user_name}',NULL,NULL,NULL)")
+                    f"INSERT INTO Client(id,name,public_key,last_seen,aes_key) VALUES('{binascii.hexlify(client_id)}','{client_user_name}',NULL,NULL,NULL)")
             except IntegrityError as e:
                 if 'UNIQUE constraint failed' in str(e):
                     return FileServerResponse(version=self.request.version, code=RESPONSE_REGISTERATION_FAILED,
@@ -62,10 +66,14 @@ class FileServerRequestHandler:
             except Exception as e:
                 print(str(e))
 
+        clients.append(Client(client_id, client_user_name, None, datetime.now(), None))
+
         return FileServerResponse(version=self.request.version, code=RESPONSE_REGISTERED_SUCCESSFULLY, payload_size=16,
                                   payload=client_id)
 
     def save_public_key(self):
+        global clients
+
         client_user_name: bytearray = self.request.payload[:255]
         client_user_name: str = client_user_name[0:client_user_name.find(b'\0')].decode()
         public_key = self.request.payload[255:]
@@ -76,6 +84,8 @@ class FileServerRequestHandler:
                 f"UPDATE Client SET aes_key = '{base64_encoded_public_key}' WHERE name='{client_user_name}'"
             )
         generated_aes_key = generate_aes_key()
+        client = [client for client in clients if client.id == self.request.client_id][0]
+        client.aes_key = generated_aes_key
 
         print(f"generated aes key {generated_aes_key}")
         encrypted_aes_key = rsa_encryption(data=generated_aes_key, public_key=public_key)
@@ -85,13 +95,16 @@ class FileServerRequestHandler:
                                   payload_size=len(raw_payload),
                                   payload=raw_payload)
 
-    def send_file(self, aes_key):
-        headers = struct.unpack('<16sI255s', self.request[:255])
-        client_id, content_size, file_name = headers
-        message_content = self.request[256:]
-        message_content = message_content[:content_size]
+    def send_file(self):
+        global clients
 
-        decrypted_file = aes_decryption(aes_key=aes_key, data=message_content)
+        total_payload_headers_size = 275
+        headers = struct.unpack('<16sI255s', self.request.payload[:total_payload_headers_size])
+        client_id, content_size, file_name = headers
+
+        message_content = self.request.payload[total_payload_headers_size:]
+        client = [client for client in clients if client.id == self.request.client_id][0]
+        decrypted_file = aes_decryption(aes_key=client.aes_key, data=message_content)
         return get_crc_sum(decrypted_file)
 
     def valid_crc(self):

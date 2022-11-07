@@ -12,8 +12,7 @@ logging.basicConfig(format='%(asctime)s %(message)s')
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
 
-
-users_data = dict() # Global variable, containing all of the client's data
+clients = dict() # Global variable, containing all of the client's data
 
 def init_server():
     pass
