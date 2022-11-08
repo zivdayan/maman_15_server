@@ -105,7 +105,11 @@ class FileServerRequestHandler:
         message_content = self.request.payload[total_payload_headers_size:]
         client = [client for client in clients if client.id == self.request.client_id][0]
         decrypted_file = aes_decryption(aes_key=client.aes_key, data=message_content)
-        return get_crc_sum(decrypted_file)
+
+        payload = struct.pack('<16sI255sI', client_id, content_size, file_name, get_crc_sum(decrypted_file))
+
+        return FileServerResponse(version=self.request.version, code=RESPONSE_VALID_FILE_RECV_CRC,
+                                  payload_size=len(payload), payload=payload)
 
     def valid_crc(self):
         pass
