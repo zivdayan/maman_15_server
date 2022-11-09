@@ -52,11 +52,11 @@ class SQLiteDatabase:
 
         self.cursor.execute(query)
 
-    def write(self, query):
-        self.cursor.execute(query)
+    def write(self, query, *args):
+        self.cursor.execute(query, args)
 
-    def update(self, query):
-        self.cursor.execute(query)
+    def update(self, query, *args):
+        self.cursor.execute(query, args)
 
-    def query(self, sql):
-        self.cursor.execute(sql)
+    def query(self, sql, *args):
+        self.cursor.execute(sql, args)

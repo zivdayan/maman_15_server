@@ -31,7 +31,7 @@ class FileTCPServer:
     def accept(self, sock: socket.socket, mask):
         conn, addr = sock.accept()  # Should be ready
         self.logger.debug(f"Accepted connection {conn} from {addr}")
-        conn.setblocking(True)
+        conn.setblocking(False)
         conn.settimeout(1)
 
         self.current_connections[conn.fileno()] = conn.getpeername()
