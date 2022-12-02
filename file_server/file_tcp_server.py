@@ -7,6 +7,11 @@ sel = selectors.DefaultSelector()
 
 
 class FileTCPServer:
+    """
+    The main class defines the infastracture to handle TCP requests.
+    """
+
+
     LOCALHOST_KEYWORD = 'localhost'
     MAX_CONNECTIONS = 100
     PORT_INFO_FILE_PATH = 'port.info'
@@ -38,11 +43,14 @@ class FileTCPServer:
         sel.register(conn, selectors.EVENT_READ, FileTCPServer.read)
 
     def close_connection(self, conn):
-        connection_name = self.current_connections[conn.fileno()]
-        self.logger.info('closing connection to {0}'.format(connection_name))
-        del self.current_connections[conn.fileno()]
-        sel.unregister(conn)
-        conn.close()
+        try:
+            connection_name = self.current_connections[conn.fileno()]
+            self.logger.info('closing connection to {0}'.format(connection_name))
+            del self.current_connections[conn.fileno()]
+            sel.unregister(conn)
+            conn.close()
+        except Exception:
+            self.logger.warning('Connection tried to be closed, although it was already closed')
 
     def read(self, conn: socket.socket, mask=None):
         data = bytearray()
@@ -95,6 +103,8 @@ class FileTCPServer:
                     callback(self, key.fileobj, mask)
                 except (ConnectionResetError, ConnectionAbortedError, ConnectionRefusedError) as e:
                     self.close_connection(key.fileobj)
+                except Exception as e:
+                    self.logger.error(f"Internal server error occurred {e}")
 
     def __enter__(self):
         self.start()

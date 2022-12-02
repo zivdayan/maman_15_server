@@ -15,11 +15,24 @@ import secrets
 from crypto.utils import *
 from base64 import b64encode
 import struct
+import logging
+
+from db.consts import *
 
 clients = list()
+logger = logging.getLogger(__name__)
+
+
+class RequestHandlerException(Exception):
+    pass
 
 
 class FileServerRequestHandler:
+    """
+    This class defined the main handler that response, build and process the client's requests.
+    """
+
+
     BASE_TABLES = {f"{c.__name__}": c.SQL_COLUMNS_DESCRIPTION for c in [File, Client]}
     DUMMY_INVALID_CRC = 0
 
@@ -29,20 +42,26 @@ class FileServerRequestHandler:
         self.init_db()
 
     def handle(self) -> FileServerResponse:
-        request: FileServerRequest = FileServerRequest.parse_binary_request(self.raw_request)
-        self.request = request
-        if self.request.code is not REQUEST_REGISTER_CODE:
-            self.update_last_seen()
-        requested_function = self.request_to_function_mapping.get(request.code)
+        try:
+            request: FileServerRequest = FileServerRequest.parse_binary_request(self.raw_request)
+            self.request = request
+            if self.request.code is not REQUEST_REGISTER_CODE:
+                self.update_last_seen()
+            requested_function = self.request_to_function_mapping.get(request.code)
 
-        response: FileServerResponse = requested_function()
+            response: FileServerResponse = requested_function()
 
-        return response
+            return response
+        except Exception as e:
+            logger.error(f"Could not handle the request ({requested_function.__name__}) due to: {e}")
+            return FileServerResponse(version=self.request.version, code=RESPONSE_REGISTERATION_FAILED,
+                                      payload_size=0,
+                                      payload=None)
 
     def update_last_seen(self):
         with SQLiteDatabase() as db:
             db.update(
-                "UPDATE Client SET last_seen = ? WHERE id=?", datetime.now(), binascii.hexlify(self.request.client_id)
+                QUERY_UPDATE_LAST_SEEN, datetime.now(), binascii.hexlify(self.request.client_id)
             )
 
     @property
@@ -56,18 +75,26 @@ class FileServerRequestHandler:
             db.init_db(FileServerRequestHandler.BASE_TABLES)
 
     def register_user(self):
-        global clients
+        """
+        The main function for user registration,
+        executed multiple commands to update the Database and validate the new user's details.
+        :raises UserAlreadyRegistered - in case there is a user which tries to register already registered.
+        :return:
+        """
 
-        client_id = self.request.client_id = binascii.unhexlify(secrets.token_hex(16))
-        client_user_name = self.request.payload[:-1].decode()  # Normalizing the input - removing the trailing NULL-BYTE
+        global clients
 
         with SQLiteDatabase() as db:
             try:
+                client_id = self.request.client_id = binascii.unhexlify(secrets.token_hex(16))
+                client_user_name = self.request.payload[
+                                   :-1].decode()  # Normalizing the input - removing the trailing NULL-BYTE
+
                 db.write(
-                    f"INSERT INTO Client(id,name,public_key,last_seen,aes_key) VALUES(?,?,NULL,NULL,NULL)",
+                    INSERT_NEW_USER,
                     binascii.hexlify(client_id), client_user_name)
             except IntegrityError as e:
-                if 'UNIQUE constraint failed' in str(e):
+                if ID_NOT_UNIQUE_ERROR in str(e):
                     return FileServerResponse(version=self.request.version, code=RESPONSE_REGISTERATION_FAILED,
                                               payload_size=0,
                                               payload=str())
@@ -83,6 +110,11 @@ class FileServerRequestHandler:
                                   payload=client_id)
 
     def save_public_key(self):
+        """
+        The main function which handles the saving of public key.
+        :return:
+        """
+
         global clients
 
         client_user_name: bytearray = self.request.payload[:255]
@@ -92,20 +124,22 @@ class FileServerRequestHandler:
         base64_encoded_public_key = b64encode(public_key).decode()
 
         generated_aes_key = generate_aes_key()
-        client = [client for client in clients if client.id == self.request.client_id][0]
+        try:
+            client = [client for client in clients if client.id == self.request.client_id][0]
+        except KeyError:
+            raise Exception('Could not find the requested client')
         client.aes_key = generated_aes_key
 
         base64_encoded_aes_key = b64encode(generated_aes_key).decode()
 
         with SQLiteDatabase() as db:
             db.update(
-                "UPDATE Client SET public_key = ? WHERE name=?", base64_encoded_public_key, client_user_name
+                QUERY_UPDATE_PK_BY_NAME, base64_encoded_public_key, client_user_name
             )
             db.update(
-                "UPDATE Client SET aes_key = ? WHERE name=?", base64_encoded_aes_key, client_user_name
+                QUERY_UPDATE_AES_KEY_BY_NAME, base64_encoded_aes_key, client_user_name
             )
 
-        print(f"generated aes key {generated_aes_key}")
         encrypted_aes_key = rsa_encryption(data=generated_aes_key, public_key=public_key)
 
         raw_payload = struct.pack(f"16s{len(encrypted_aes_key)}s", self.request.client_id, encrypted_aes_key)
@@ -114,6 +148,10 @@ class FileServerRequestHandler:
                                   payload=raw_payload)
 
     def send_file(self):
+        """
+        The main function deals with file sending - based on previous encryption using the encrypted AES key transferred.
+        """
+
         global clients
         try:
             total_payload_headers_size = 275
@@ -121,13 +159,16 @@ class FileServerRequestHandler:
             client_id, content_size, file_name = headers
 
             message_content = self.request.payload[total_payload_headers_size:]
-            client = [client for client in clients if client.id == self.request.client_id][0]
+            try:
+                client = [client for client in clients if client.id == self.request.client_id][0]
+            except Exception as e:
+                raise Exception('Could not find the requested client')
+
             decrypted_file = aes_decryption(aes_key=client.aes_key, data=message_content)
 
             payload = struct.pack('<16sI255sI', client_id, content_size, file_name, get_crc_sum(decrypted_file))
 
         except Exception as e:
-            print(e)
             dummy_payload = struct.pack('<16sI255sI', client_id, content_size, file_name, self.DUMMY_INVALID_CRC)
             payload = dummy_payload
 
