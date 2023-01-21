@@ -2,6 +2,7 @@ import selectors
 import socket
 import logging
 from file_server.file_server_request_handler import FileServerRequestHandler
+from utils import create_files_dir
 
 sel = selectors.DefaultSelector()
 
@@ -11,18 +12,19 @@ class FileTCPServer:
     The main class defines the infastracture to handle TCP requests.
     """
 
-
     LOCALHOST_KEYWORD = 'localhost'
     MAX_CONNECTIONS = 100
     PORT_INFO_FILE_PATH = 'port.info'
     READ_ONLY_FILE_MODE = 'r'
     DEFAULT_PORT = 1234
+    FILES_DIR_NAME = 'Files'
 
-    def __init__(self, logger: logging.Logger):
+    def __init__(self, logger: logging.Logger, files_dir):
         self.logger: logging.Logger = logger
         self.port = FileTCPServer.read_server_port()
         self.max_connections = FileTCPServer.MAX_CONNECTIONS
         self.current_connections = {}
+        self.files_dir = files_dir
 
     @staticmethod
     def read_server_port():
@@ -35,7 +37,7 @@ class FileTCPServer:
 
     def accept(self, sock: socket.socket, mask):
         conn, addr = sock.accept()  # Should be ready
-        self.logger.debug(f"Accepted connection {conn} from {addr}")
+        self.logger.info(f"Accepted connection {conn} from {addr}")
         conn.setblocking(False)
         conn.settimeout(1)
 
@@ -76,9 +78,9 @@ class FileTCPServer:
             self.close_connection(conn)
 
     def handle_request(self, raw_request: bytearray) -> bytearray:
-        response = FileServerRequestHandler(raw_request).handle()
+        response = FileServerRequestHandler(raw_request, self.files_save_path, self.logger).handle()
         binary_response = response.generate_binary_request()
-        print('total response size ' + str(len(binary_response)))
+        self.logger.debug('total response size ' + str(len(binary_response)))
         return binary_response
 
     def init_server(self, port, max_connections) -> socket.socket:
@@ -112,8 +114,13 @@ class FileTCPServer:
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.stop()
 
+    @property
+    def files_save_path(self):
+        return self.files_dir + "\\" + self.FILES_DIR_NAME
+
     def start(self):
         self.socket = self.init_server(self.read_server_port(), self.MAX_CONNECTIONS)
+        create_files_dir(path=self.files_dir, dir_name='Files')
         self.start_connections_loop()
 
     def stop(self):

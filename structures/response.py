@@ -1,4 +1,5 @@
 import struct
+import logging
 
 
 class FileServerResponse:
@@ -28,19 +29,16 @@ class FileServerResponse:
             format += 'H'  # code
             format += 'I'  # unsigned payload size
 
-
             if self.payload:
                 format += f"{self.payload_size}s"
                 if type(self.payload) is str:
                     self.payload = self.payload.encode()
 
-                print(f"payload = {self.payload}")
                 return struct.pack(format, self.version, self.code, self.payload_size, self.payload)
             return struct.pack(format, self.version, self.code, self.payload_size)
 
         except Exception as e:
-            print(str(e))
-            raise FileServerResponse.InvalidException
+            raise InvalidRequest
 
 
 class InvalidRequest(Exception):

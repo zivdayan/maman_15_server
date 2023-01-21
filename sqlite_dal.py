@@ -1,14 +1,16 @@
 import sqlite3
 from os.path import isfile
 from typing import Dict
+import logging
 
 
 class SQLiteDatabase:
     DB_NAME = 'FileServer.db'
 
-    def __init__(self, name=DB_NAME):
+    def __init__(self, logger, name=DB_NAME):
         self.conn = None
         self.cursor = None
+        self.logger: logging.Logger = logger
 
         if name:
             self.open(name)
@@ -19,7 +21,7 @@ class SQLiteDatabase:
             self.cursor = self.conn.cursor()
 
         except sqlite3.Error as e:
-            print("Error connecting to database!")
+            self.logger.error(f"Error connecting to database! Reason: {str(e)}")
 
     def init_db(self, tables: Dict[str, str]):
         for table_name, table_description in tables.items():

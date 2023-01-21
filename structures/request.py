@@ -47,7 +47,7 @@ class FileServerRequest:
             return cls(client_id=client_id, version=version, code=code, payload_size=payload_size, payload=payload)
 
         except Exception:
-            raise FileServerRequest.InvalidException
+            raise InvalidRequest
 
 
 class InvalidRequest(Exception):

@@ -19,8 +19,9 @@ import logging
 
 from db.consts import *
 
+from utils import save_file, unpad_binary
+
 clients = list()
-logger = logging.getLogger(__name__)
 
 
 class RequestHandlerException(Exception):
@@ -32,18 +33,22 @@ class FileServerRequestHandler:
     This class defined the main handler that response, build and process the client's requests.
     """
 
-
     BASE_TABLES = {f"{c.__name__}": c.SQL_COLUMNS_DESCRIPTION for c in [File, Client]}
     DUMMY_INVALID_CRC = 0
 
-    def __init__(self, raw_request):
+    def __init__(self, raw_request, files_save_path, logger):
         self.raw_request = raw_request
+        self.files_save_path = files_save_path
         self.request: FileServerRequest = None
-        self.init_db()
+        self.logger: logging.Logger = logger
+        self.init_db(self.logger)
 
     def handle(self) -> FileServerResponse:
         try:
+            self.logger.debug(f"Starting the handle a request")
             request: FileServerRequest = FileServerRequest.parse_binary_request(self.raw_request)
+            self.logger.debug(f"Handing a request from {binascii.hexlify(request.client_id).decode()}")
+
             self.request = request
             if self.request.code is not REQUEST_REGISTER_CODE:
                 self.update_last_seen()
@@ -51,15 +56,16 @@ class FileServerRequestHandler:
 
             response: FileServerResponse = requested_function()
 
+            self.logger.debug(f"Handeled a request from {binascii.hexlify(request.client_id).decode()} successfully! \n Sending response.")
             return response
         except Exception as e:
-            logger.error(f"Could not handle the request ({requested_function.__name__}) due to: {e}")
+            self.logger.error(f"Could not handle the request ({requested_function.__name__}) due to: {e}")
             return FileServerResponse(version=self.request.version, code=RESPONSE_REGISTERATION_FAILED,
                                       payload_size=0,
                                       payload=None)
 
     def update_last_seen(self):
-        with SQLiteDatabase() as db:
+        with SQLiteDatabase(logger=self.logger) as db:
             db.update(
                 QUERY_UPDATE_LAST_SEEN, datetime.now(), binascii.hexlify(self.request.client_id)
             )
@@ -70,8 +76,8 @@ class FileServerRequestHandler:
                 1105: self.invalid_crc, 1106: self.invalid_crc_terminating}
 
     @staticmethod
-    def init_db():
-        with SQLiteDatabase() as db:
+    def init_db(logger):
+        with SQLiteDatabase(logger=logger) as db:
             db.init_db(FileServerRequestHandler.BASE_TABLES)
 
     def register_user(self):
@@ -84,7 +90,9 @@ class FileServerRequestHandler:
 
         global clients
 
-        with SQLiteDatabase() as db:
+        self.logger.debug('Received user registration requests')
+
+        with SQLiteDatabase(logger=self.logger) as db:
             try:
                 client_id = self.request.client_id = binascii.unhexlify(secrets.token_hex(16))
                 client_user_name = self.request.payload[
@@ -95,6 +103,8 @@ class FileServerRequestHandler:
                     binascii.hexlify(client_id), client_user_name)
             except IntegrityError as e:
                 if ID_NOT_UNIQUE_ERROR in str(e):
+                    self.logger.warning(
+                        f"User (Client id  - {binascii.hexlify(client_id).decode()}, Username - {client_user_name}) tried to register although already registered")
                     return FileServerResponse(version=self.request.version, code=RESPONSE_REGISTERATION_FAILED,
                                               payload_size=0,
                                               payload=str())
@@ -115,6 +125,8 @@ class FileServerRequestHandler:
         :return:
         """
 
+        self.logger.debug('Received user request to set a public key')
+
         global clients
 
         client_user_name: bytearray = self.request.payload[:255]
@@ -132,7 +144,7 @@ class FileServerRequestHandler:
 
         base64_encoded_aes_key = b64encode(generated_aes_key).decode()
 
-        with SQLiteDatabase() as db:
+        with SQLiteDatabase(logger=self.logger) as db:
             db.update(
                 QUERY_UPDATE_PK_BY_NAME, base64_encoded_public_key, client_user_name
             )
@@ -152,11 +164,15 @@ class FileServerRequestHandler:
         The main function deals with file sending - based on previous encryption using the encrypted AES key transferred.
         """
 
+        self.logger.debug('Received user request to send a file')
+
         global clients
         try:
             total_payload_headers_size = 275
             headers = struct.unpack('<16sI255s', self.request.payload[:total_payload_headers_size])
             client_id, content_size, file_name = headers
+
+            sanitized_file_name = unpad_binary(file_name, b'\xcc').decode()
 
             message_content = self.request.payload[total_payload_headers_size:]
             try:
@@ -166,9 +182,13 @@ class FileServerRequestHandler:
 
             decrypted_file = aes_decryption(aes_key=client.aes_key, data=message_content)
 
+            save_file(path=self.files_save_path + '\\' + sanitized_file_name, data=decrypted_file)
+            self.logger.info(f"Recieved file {sanitized_file_name} by {binascii.hexlify(client_id).decode()} saved successfully!")
+
             payload = struct.pack('<16sI255sI', client_id, content_size, file_name, get_crc_sum(decrypted_file))
 
         except Exception as e:
+            self.logger.error(e)
             dummy_payload = struct.pack('<16sI255sI', client_id, content_size, file_name, self.DUMMY_INVALID_CRC)
             payload = dummy_payload
 
